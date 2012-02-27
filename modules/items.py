@@ -22,6 +22,8 @@ class Item(object):
     self.__summary = utils.HtmlUnescape((summary, '')[summary is None])
     self.__title = utils.HtmlUnescape((title, '')[title is None])
     self.__created = created
+    self.__rotation = None
+    self.__comments = []
 
   def __str__(self):
     return "%s: title='%s' created='%s' summary='%s' description='%s' keywords='%s'" % (
@@ -50,11 +52,22 @@ class Item(object):
   def created(self):
     return self.__created
 
+  def rotation(self):
+    return self.__rotation
+
+  def comments(self):
+    return self.__comments
+
+  def add_comment(self, comment):
+    self.__comments.append(comment)
+
+  def set_rotation(self, rotation):
+    self.__rotation = rotation
+
 class ChildEntity(Item):
   TABLE_NAME = 'ChildEntity'
 
   def __init__(self, db, id):
-    Item.__init__(self, db, id)
     (parent_id,) = db.FieldsForItem(id, ChildEntity.TABLE_NAME, 'parentId')
     self.__parent_id = None
     if parent_id > 0:
@@ -145,3 +158,36 @@ class AlbumItem(ChildEntity, FileSystemEntity):
       return os.path.join((parent.full_album_path(db) or ''), self.path_component())
     else:
       return self.path_component()
+
+class Derivative(object):
+  TABLE_NAME = 'Derivative'
+
+  def __init__(self, db, id):
+    self.__id = id
+    (source_id,operations) = db.FieldsForItem(id, Derivative.TABLE_NAME, 'derivativeSourceId', 'derivativeOperations')
+    self.__source_id = None
+    if source_id > 0:
+      self.__source_id = source_id
+    self.__operations = operations
+
+  def source_id(self):
+    return self.__source_id
+
+  def operations(self):
+    return self.__operations
+
+class Comment(object):
+  TABLE_NAME = 'Comment'
+
+  def __init__(self, db, id):
+    self.__id = id
+    (subject,comment) = db.FieldsForItem(id, Comment.TABLE_NAME, 'subject', 'comment')
+    self.__subject = subject
+    self.__comment = comment
+
+  def subject(self):
+    return self.__subject
+
+  def comment(self):
+    return self.__comment
+

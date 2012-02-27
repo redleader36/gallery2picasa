@@ -22,7 +22,7 @@ FLAGS.AddFlag('t', 'table_prefix', 'The table prefix to use', 'g2_')
 FLAGS.AddFlag('f', 'field_prefix', 'The field prefix to use', 'g_')
 FLAGS.AddFlag('u', 'username', 'The Google username to use')
 FLAGS.AddFlag('p', 'password', 'The Google password to use (interactive prompt if unspecified)', '')
-FLAGS.AddFlag('y', 'privacy', 'The access level for the album ("private" or "public")', 'public')
+FLAGS.AddFlag('y', 'privacy', 'The access level for the album ("private" or "public")', 'private')
 FLAGS.AddFlag('o', 'confirm', 'Confirm upload for every album', 'true')
 FLAGS.AddFlag('x', 'exclude_movies', 'Exclude movies from the upload', 'false')
 FLAGS.AddFlag('n', 'dry_run', 'Do not upload, just print what would be uploaded', 'false')
@@ -32,6 +32,7 @@ FLAGS.AddFlag('l', 'long_titles', 'Construct long album titles using parents\' t
 FLAGS.AddFlag('c', 'truncate_count',
     'Truncate this many album names from long titles. To be used with -l.',
      '0')
+FLAGS.AddFlag('s', 'single_album', 'Only upload this single album (by name)')
 
 # Error avoidance
 retry = 10            # Number of retries
@@ -133,7 +134,8 @@ def main(argv):
       FLAGS.hostname, FLAGS.table_prefix, FLAGS.field_prefix)
 
   pws = gdata.photos.service.PhotosService()
-  pws.ClientLogin(FLAGS.username, FLAGS.password)
+  if FLAGS.dry_run != 'true':
+    pws.ClientLogin(FLAGS.username, FLAGS.password)
 
   confirm = FLAGS.confirm
   if confirm == 'true':
@@ -152,12 +154,48 @@ def main(argv):
 
     albumlist = sorted(albumlist, key=lambda album: album[1] )
 
+    child_entities = {}
+    child_ids = gdb.ItemIdsForTable(items.ChildEntity.TABLE_NAME)
+    for id in child_ids:
+      child = items.ChildEntity(gdb, id)
+      child_entities[id] = child
+
+    comments_by_photo = {}
+    comment_ids = gdb.ItemIdsForTable(items.Comment.TABLE_NAME)
+    for id in comment_ids:
+      comment = items.Comment(gdb, id)
+      child = child_entities.get(id)
+      if child:
+        photo_id = child.parent_id()
+        if photo_id not in comments_by_photo:
+          comments_by_photo[photo_id] = []
+        comments_by_photo[photo_id].append(comment)
+
+    derivatives_by_photo = {}
+    derivative_ids = gdb.ItemIdsForTable(items.Derivative.TABLE_NAME)
+    for id in derivative_ids:
+      derivative = items.Derivative(gdb, id)
+      if derivative.source_id() not in derivatives_by_photo:
+        derivatives_by_photo[derivative.source_id()] = []
+      derivatives_by_photo[derivative.source_id()].append(derivative)
+
     photos_by_album = {}
     photo_ids = gdb.ItemIdsForTable(items.PhotoItem.TABLE_NAME)
     for id in photo_ids:
       photo = items.PhotoItem(gdb, id)
       if photo.parent_id() not in photos_by_album:
         photos_by_album[photo.parent_id()] = []
+
+      derivatives = derivatives_by_photo.get(id)
+      for derivative in derivatives:
+        operation = derivative.operations()
+        if operation.startswith('rotate'):
+            rotation = operation.split('|')[1]
+            photo.set_rotation(rotation)
+
+      comments = comments_by_photo.get(id, [])
+      for comment in comments:
+          photo.add_comment(comment)
 
       photos_by_album[photo.parent_id()].append(photo)
 
@@ -175,9 +213,15 @@ def main(argv):
       for album in albumlist:
         if album[0] not in photos_by_album:
           continue
+
         upload_album = False
         confirmed = False
         while confirmed == False:
+          if FLAGS.single_album:
+            if FLAGS.single_album == album[1]:
+              upload_album = True
+            confirmed = True
+            continue
           confirm_input = raw_input('Upload Album "%s"? [y/N/a]' % album[1].encode(default_encoding, 'replace')).lower()
           if confirm_input == 'n' or confirm_input == '':
             confirmed = True
@@ -230,6 +274,10 @@ def main(argv):
         title = photo.title() or photo.path_component()
         summary = photo.summary() or photo.description() or photo.title()
 
+        if photo.title() and photo.summary() and photo.description():
+            print("Warning: title, summary and description used. Description is merged with summary!")
+            summary = photo.summary() + photo.description()
+  
         keywords = ', '.join(photo.keywords().split())
 
         mtries, mdelay = retry, delay
@@ -243,8 +291,19 @@ def main(argv):
                 photo.path_component(), title, summary, photo.keywords())
             print strout.encode(default_encoding, 'replace')
             if FLAGS.dry_run != 'true':
-              pws.InsertPhotoSimple(galbum.GetFeedLink().href, title,
+              pws_photo = pws.InsertPhotoSimple(galbum.GetFeedLink().href, title,
                 summary, filename, keywords=keywords, content_type=filetype)
+
+            if photo.rotation():
+              print "Rotating photo by %s degrees" % photo.rotation()
+              if FLAGS.dry_run != 'true':
+                  pws_photo.rotation = gdata.photos.Rotation(text=rotation)
+                  pws_photo = pws.UpdatePhotoMetadata(pws_photo)
+
+            for comment in photo.comments():
+              if FLAGS.dry_run != 'true':
+                  pws.InsertComment(photo, comment)
+
             success = True
             break
           except gdata.photos.service.GooglePhotosException, e:
