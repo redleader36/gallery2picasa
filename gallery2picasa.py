@@ -7,6 +7,8 @@ from modules import utils
 
 import gdata.photos
 import gdata.photos.service
+import gdata.media
+import gdata.geo
 import getopt
 import sys
 import time
@@ -135,7 +137,11 @@ def main(argv):
 
   pws = gdata.photos.service.PhotosService()
   if FLAGS.dry_run != 'true':
-    pws.ClientLogin(FLAGS.username, FLAGS.password)
+    # pws.ClientLogin(FLAGS.username, FLAGS.password)
+    pws.email = FLAGS.username
+    pws.password = FLAGS.password
+    pws.source = 'Redleader36-Gallery2Picasa'
+    pws.ProgrammaticLogin()
 
   confirm = FLAGS.confirm
   if confirm == 'true':
