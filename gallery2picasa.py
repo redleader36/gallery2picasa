@@ -7,6 +7,7 @@ from modules import utils
 
 import gdata.photos
 import gdata.photos.service
+import gdata.gauth
 import gdata.media
 import gdata.geo
 import getopt
@@ -14,6 +15,12 @@ import sys
 import time
 import mimetypes
 import getpass
+import os
+import webbrowser
+
+from datetime import datetime, timedelta
+from oauth2client.client import flow_from_clientsecrets
+from oauth2client.file import Storage
 
 FLAGS = flags.FLAGS
 FLAGS.AddFlag('b', 'dbuser', 'The username to use for the database')
@@ -71,6 +78,32 @@ for mtype in valid_mimetypes:
   mayor, minor = mtype.split('/')
   if mayor == 'video':
     gdata.photos.service.SUPPORTED_UPLOAD_TYPES += (minor,)
+
+def OAuth2Login(client_secrets, credential_store, email):
+    scope='https://picasaweb.google.com/data/'
+    user_agent='picasawebuploader'
+
+    storage = Storage(credential_store)
+    credentials = storage.get()
+    if credentials is None or credentials.invalid:
+        flow = flow_from_clientsecrets(client_secrets, scope=scope, redirect_uri='urn:ietf:wg:oauth:2.0:oob')
+        uri = flow.step1_get_authorize_url()
+        webbrowser.open(uri)
+        code = raw_input('Enter the authentication code: ').strip()
+        credentials = flow.step2_exchange(code)
+
+    if (credentials.token_expiry - datetime.utcnow()) < timedelta(minutes=5):
+        http = httplib2.Http()
+        http = credentials.authorize(http)
+        credentials.refresh(http)
+
+    storage.put(credentials)
+
+    gd_client = gdata.photos.service.PhotosService(source=user_agent,
+                                                   email=email,
+                                                   additional_headers={'Authorization' : 'Bearer %s' % credentials.access_token})
+
+    return gd_client
 
 def create_google_album(pws, album, atitle, privacy, seq=0):
   summary = album.summary() or album.description()
@@ -135,13 +168,12 @@ def main(argv):
   gdb = db.Database(FLAGS.dbuser, FLAGS.dbpass, FLAGS.database,
       FLAGS.hostname, FLAGS.table_prefix, FLAGS.field_prefix)
 
-  pws = gdata.photos.service.PhotosService()
+  client_secrets = 'client_secrets.json'
+  credential_store = 'credentials.dat'
+  
   if FLAGS.dry_run != 'true':
     # pws.ClientLogin(FLAGS.username, FLAGS.password)
-    pws.email = FLAGS.username
-    pws.password = FLAGS.password
-    pws.source = 'Redleader36-Gallery2Picasa'
-    pws.ProgrammaticLogin()
+    pws = OAuth2Login(client_secrets, credential_store, FLAGS.username)
 
   confirm = FLAGS.confirm
   if confirm == 'true':
