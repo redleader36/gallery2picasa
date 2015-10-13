@@ -41,7 +41,7 @@ FLAGS.AddFlag('l', 'long_titles', 'Construct long album titles using parents\' t
 FLAGS.AddFlag('c', 'truncate_count',
     'Truncate this many album names from long titles. To be used with -l.',
      '0')
-FLAGS.AddFlag('s', 'single_album', 'Only upload this single album (by name)')
+FLAGS.AddFlag('s', 'single_album', 'Only upload this single album (by name)', '')
 
 # Error avoidance
 retry = 10            # Number of retries
